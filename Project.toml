@@ -1,7 +1,7 @@
 name = "InfluenceMaximization"
 uuid = "67543bf9-58ea-4022-94a3-1a6c69d9be25"
 version = "0.1.0"
-authors = ["azeredo-e <eduardo.azeredo99@gmail.com>"]
+authors = ["azeredo-e <azeredo.se@gmail.com>"]
 
 [deps]
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
