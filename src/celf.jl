@@ -1,49 +1,68 @@
 
 """
-    lazy_forward(g, costs, B, type, prob; n_iters, rng) -> Vector{Int}
+    lazy_forward(g, costs, B, type; n_iters, rng) -> Vector{Int}
+ 
+CELF lazy-forward seed selection (Leskovec et al., KDD 2007).
 """
 function lazy_forward(
-    g::AbstractSimpleWeightedGraph,
-    costs::Vector{Float64},
-    B::Float64,
-    type::Symbol;
-    n_iters::Int = STD_N_ITERS,
-    rng::Union{AbstractRNG, UnivariateDistribution} = Uniform(0,1),
-)::Vector{Int}
-    # Helper variables and functions
-    n_nodes = nv(g) # TODO: I think i need to fix the case where cost=0
-    @inline cost_of_A() = isempty(A) ? 0.0 : sum(costs[s] for s in A) # Cost already spent on the current placement A
-    @inline affordable(s) = cost_of_A() + costs[s] ≤ B # Is adding node s to A still within budget?
-    @inline candidates()::Vector{Int} = [s for s in 1:n_nodes if s ∉ A && affordable(s)] # All nodes not yet in A that fit within the remaining budget.
-    priority(s)::Float64 = type == :UC ? δ[s] : δ[s] / costs[s] # Do either UC or CB for argmax
-
+    g     :: AbstractSimpleWeightedGraph,
+    costs :: Vector{Float64},
+    B     :: Float64,
+    type  :: Symbol;
+    n_iters :: Int = STD_N_ITERS,
+    rng     :: Union{AbstractRNG, UnivariateDistribution} = Uniform(0, 1),
+) :: Vector{Int}
+    n = nv(g)
     A = Int[]
-    δ = fill(Inf, n_nodes) # δs for each node s
-    cur = Vector{Bool}(undef, n_nodes) # curs flag: was δs computed this outer iteration?
+    sizehint!(A, n)
+    δ = fill(Inf, n)
+    cur = falses(n)
+    in_A = falses(n)
+    budget_used = 0.0
+    tmp_seeds   = Vector{Int}(undef, n)
+    use_uc = (type === :UC)
 
-    while !isempty(candidates()) # while ∃s ∈ V\A : c(A ∪ {s}) ≤ B  do
-        for s = 1:n_nodes # foreach s ∈ V\A do  curs ← false
-            cur[s] = false
+    while true # while ∃ affordable s ∉ A
+        # Quick check for performance: if no candidate is affordable, we can break early without recomputing the candidates list
+        any_candidate = false
+        @inbounds for s in 1:n
+            if !in_A[s] && budget_used + costs[s] ≤ B
+                any_candidate = true
+                break
+            end
         end
+        any_candidate || break
 
+        fill!(cur, false) # foreach s ∈ V\A do  curs ← false
         R_A = isempty(A) ? 0.0 : independent_cascade(g, A; n_iters, rng) # Calculate the gain from seed nodes A
+        len_A = length(A)
+        copyto!(tmp_seeds, 1, A, 1, len_A)
 
         while true
-            cands = candidates() #? This list could be a statict vedctor
-
-            #! Optimze here, broadcast is hurting performance
-            s_star = cands[argmax(priority.(cands))] # Calculate for both UC and CB
-
-            if cur[s_star] # if curs*  then  A ← A ∪ {s*};  break
-                push!(A, s_star)
-                break
-            else # else  δs* ← R(A ∪ {s*}) − R(A);  curs* ← true
-                δ[s_star] = independent_cascade(g, [A; s_star]; n_iters, rng) - R_A
-                cur[s_star] = true
+            s_star = 0
+            best_p = -Inf
+            @inbounds for s in 1:n
+                (in_A[s] || budget_used + costs[s] > B) && continue
+                p = use_uc ? δ[s] : δ[s] / costs[s]
+                if p > best_p
+                    best_p = p
+                    s_star = s
+                end
             end
-        end   # while true (inner loop)
-    end   # while ∃ affordable candidate (outer loop)
 
+            if @inbounds cur[s_star]  # if curs*  then  A ← A ∪ {s*};  break
+                push!(A, s_star)
+                @inbounds in_A[s_star] = true
+                budget_used += costs[s_star]
+                break 
+            else # else  δs* ← R(A ∪ {s*}) − R(A);  curs* ← true
+                @inbounds tmp_seeds[len_A + 1] = s_star
+                @inbounds δ[s_star] = independent_cascade(g, @view(tmp_seeds[1:len_A + 1]); n_iters, rng) - R_A
+                @inbounds cur[s_star] = true
+            end
+        end
+    end # while ∃ affordable candidate (outer loop)
+ 
     return A
 end
 

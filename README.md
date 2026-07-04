@@ -2,4 +2,4 @@
 
 Influence maximizations algorithms.
 
-Current implemented algorithms: CELF and CELF++.
+Current implemented algorithms: SelectTopK, RankedReplace, Greedy, CELF and CELF++.
